@@ -140,6 +140,7 @@ class TestDetectHardware:
     def test_falls_back_to_cpu(self):
         with (
             patch("researchclaw.hardware._detect_nvidia", return_value=None),
+            patch("researchclaw.hardware._detect_amd", return_value=None),
             patch("researchclaw.hardware._detect_mps", return_value=None),
         ):
             profile = detect_hardware()

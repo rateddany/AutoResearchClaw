@@ -85,7 +85,7 @@ Investigate the topic with emphasis on reproducible methods and measurable outco
     (stage_dir / "goal.md").write_text(goal_md, encoding="utf-8")
 
     # --- Hardware detection (GPU / MPS / CPU) ---
-    hw = detect_hardware()
+    hw = detect_hardware(experiment_mode=config.experiment.mode)
     (stage_dir / "hardware_profile.json").write_text(
         json.dumps(hw.to_dict(), indent=2), encoding="utf-8"
     )

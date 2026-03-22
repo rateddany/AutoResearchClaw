@@ -41,16 +41,38 @@ class HardwareProfile:
         return asdict(self)
 
 
-def detect_hardware() -> HardwareProfile:
+def detect_hardware(experiment_mode: str = "sandbox") -> HardwareProfile:
     """Detect local GPU hardware and return a HardwareProfile.
 
+    When *experiment_mode* is ``"slurm"``, skip local detection and
+    report the cluster as having GPUs available (experiments run on
+    compute nodes, not the login node).
+
     Detection order:
-    1. NVIDIA GPU via ``nvidia-smi``
-    2. macOS Apple Silicon (MPS) via platform check
-    3. Fallback to CPU-only
+    1. Slurm mode → assume cluster GPUs available
+    2. NVIDIA GPU via ``nvidia-smi``
+    3. AMD GPU via ``rocm-smi``
+    4. macOS Apple Silicon (MPS) via platform check
+    5. Fallback to CPU-only
     """
+    # --- Slurm mode: cluster has GPUs, local detection is irrelevant ---
+    if experiment_mode == "slurm":
+        return HardwareProfile(
+            has_gpu=True,
+            gpu_type="rocm",
+            gpu_name="Slurm cluster GPUs (allocated per job)",
+            vram_mb=65536,  # MI210 = 64GB HBM2e
+            tier="high",
+            warning="",
+        )
+
     # --- Try NVIDIA ---
     profile = _detect_nvidia()
+    if profile is not None:
+        return profile
+
+    # --- Try AMD ROCm ---
+    profile = _detect_amd()
     if profile is not None:
         return profile
 
@@ -116,6 +138,70 @@ def _detect_nvidia() -> HardwareProfile | None:
         return HardwareProfile(
             has_gpu=True,
             gpu_type="cuda",
+            gpu_name=gpu_name,
+            vram_mb=vram_mb,
+            tier=tier,
+            warning=warning,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+
+
+def _detect_amd() -> HardwareProfile | None:
+    """Detect AMD GPU via rocm-smi."""
+    try:
+        result = subprocess.run(
+            ["rocm-smi", "--showproductname"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+
+        # Parse GPU name from rocm-smi output
+        gpu_name = "AMD GPU"
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if "GPU" in line.upper() and ":" in line:
+                gpu_name = line.split(":", 1)[-1].strip()
+                if gpu_name:
+                    break
+
+        # Try to get VRAM
+        vram_mb: int | None = None
+        try:
+            mem_result = subprocess.run(
+                ["rocm-smi", "--showmeminfo", "vram"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if mem_result.returncode == 0:
+                for line in mem_result.stdout.splitlines():
+                    if "total" in line.lower():
+                        parts = line.split()
+                        for part in parts:
+                            try:
+                                val = int(part)
+                                if val > 1000:  # likely bytes or MB
+                                    vram_mb = val if val < 1_000_000 else val // (1024 * 1024)
+                                    break
+                            except ValueError:
+                                continue
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+
+        tier = "high" if (vram_mb is None or vram_mb >= _HIGH_VRAM_THRESHOLD_MB) else "limited"
+        warning = "" if tier == "high" else (
+            f"AMD GPU ({gpu_name}, {vram_mb} MB VRAM) has limited memory."
+        )
+
+        return HardwareProfile(
+            has_gpu=True,
+            gpu_type="rocm",
             gpu_name=gpu_name,
             vram_mb=vram_mb,
             tier=tier,
