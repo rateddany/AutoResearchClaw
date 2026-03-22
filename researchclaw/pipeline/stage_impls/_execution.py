@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 import time as _time
 from pathlib import Path
@@ -99,6 +100,47 @@ def _execute_resource_planning(
         artifacts=("schedule.json",),
         evidence_refs=("stage-11/schedule.json",),
     )
+
+
+def _build_parallel_tasks(
+    schedule: dict[str, Any],
+    code: str,
+    *,
+    seeds: int = 3,
+) -> list[dict[str, str]]:
+    """Build parallel experiment tasks from schedule and code.
+
+    Creates one task per (condition x seed). Each task's code has
+    environment variables and random seeds injected.
+    """
+    tasks_spec = schedule.get("tasks", []) if isinstance(schedule, dict) else []
+    if not isinstance(tasks_spec, list) or not tasks_spec:
+        tasks_spec = [{"id": "default", "name": "default experiment"}]
+
+    tasks: list[dict[str, str]] = []
+    for task_def in tasks_spec:
+        if not isinstance(task_def, dict):
+            continue
+        condition_id = str(task_def.get("id", "unknown"))
+        for seed in range(seeds):
+            task_id = f"{condition_id}_seed{seed}"
+            injected_code = (
+                f"import os\n"
+                f"os.environ['RESEARCHCLAW_CONDITION'] = {condition_id!r}\n"
+                f"os.environ['RESEARCHCLAW_SEED'] = {str(seed)!r}\n"
+                f"import random; random.seed({seed})\n"
+                f"try:\n"
+                f"    import numpy; numpy.random.seed({seed})\n"
+                f"except ImportError:\n"
+                f"    pass\n"
+                f"try:\n"
+                f"    import torch; torch.manual_seed({seed})\n"
+                f"except ImportError:\n"
+                f"    pass\n\n"
+                f"{code}"
+            )
+            tasks.append({"task_id": task_id, "code": injected_code})
+    return tasks
 
 
 def _execute_experiment_run(
@@ -274,6 +316,65 @@ def _execute_experiment_run(
                                 "minimum 3 required for statistical validity",
                                 _cname, int(_seeds_run),
                             )
+
+    elif mode == "slurm":
+        from researchclaw.experiment.slurm_sandbox import SlurmBatchDispatcher
+
+        dispatcher = SlurmBatchDispatcher(
+            config.experiment.slurm, runs_dir / "slurm",
+        )
+        parallel_tasks = _build_parallel_tasks(
+            _safe_json_loads(schedule_text, {}),
+            code_text,
+            seeds=3,
+        )
+        logger.info(
+            "Stage 12: Submitting %d parallel Slurm jobs (%s)",
+            len(parallel_tasks), config.experiment.slurm.partition,
+        )
+        batch_results = dispatcher.submit_batch(
+            parallel_tasks,
+            timeout_sec=config.experiment.time_budget_sec * 3,
+        )
+
+        all_metrics: dict[str, Any] = {}
+        completed_count = 0
+        failed_count = 0
+        for br in batch_results:
+            run_payload: dict[str, Any] = {
+                "run_id": br.task_id,
+                "task_id": br.task_id,
+                "job_id": br.job_id,
+                "status": "completed" if br.status == "COMPLETED" else "failed",
+                "metrics": br.sandbox_result.metrics,
+                "elapsed_sec": br.sandbox_result.elapsed_sec,
+                "slurm_status": br.status,
+                "completed_at": _utcnow_iso(),
+            }
+            (runs_dir / f"{_safe_filename(br.task_id)}.json").write_text(
+                json.dumps(run_payload, indent=2), encoding="utf-8",
+            )
+            if br.status == "COMPLETED":
+                completed_count += 1
+                all_metrics.update(br.sandbox_result.metrics)
+            else:
+                failed_count += 1
+
+        summary = {
+            "mode": "slurm_parallel",
+            "total_tasks": len(parallel_tasks),
+            "completed": completed_count,
+            "failed": failed_count,
+            "aggregated_metrics": all_metrics,
+            "completed_at": _utcnow_iso(),
+        }
+        (runs_dir / "slurm_summary.json").write_text(
+            json.dumps(summary, indent=2), encoding="utf-8",
+        )
+        logger.info(
+            "Stage 12: Slurm batch complete — %d/%d jobs succeeded",
+            completed_count, len(parallel_tasks),
+        )
 
     elif mode == "simulated":
         schedule = _safe_json_loads(schedule_text, {})
