@@ -53,3 +53,14 @@ def test_slurm_mode_in_experiment_modes():
     """'slurm' is a valid experiment mode."""
     from researchclaw.config import EXPERIMENT_MODES
     assert "slurm" in EXPERIMENT_MODES
+
+
+def test_factory_creates_slurm_sandbox(tmp_path):
+    """create_sandbox returns SlurmSandbox for mode='slurm'."""
+    from researchclaw.config import ExperimentConfig, SlurmConfig
+    from researchclaw.experiment.factory import create_sandbox
+
+    cfg = ExperimentConfig(mode="slurm", slurm=SlurmConfig())
+    sandbox = create_sandbox(cfg, tmp_path)
+    from researchclaw.experiment.slurm_sandbox import SlurmSandbox
+    assert isinstance(sandbox, SlurmSandbox)

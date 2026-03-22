@@ -78,6 +78,16 @@ def create_sandbox(config: ExperimentConfig, workdir: Path) -> SandboxProtocol:
 
         return ColabDriveSandbox(colab_cfg, workdir)
 
+    if config.mode == "slurm":
+        from researchclaw.experiment.slurm_sandbox import SlurmSandbox
+
+        slurm_cfg = config.slurm
+        logger.info(
+            "Slurm sandbox: partition=%s, gpus=%d",
+            slurm_cfg.partition, slurm_cfg.gpus_per_node,
+        )
+        return SlurmSandbox(slurm_cfg, workdir)
+
     if config.mode != "sandbox":
         raise RuntimeError(
             f"Unsupported experiment mode for create_sandbox(): {config.mode}"
