@@ -1,0 +1,110 @@
+project:
+  name: "my-research"
+  mode: "full-auto"
+
+research:
+  topic: "Your research topic here"
+  domains:
+    - "machine-learning"
+  daily_paper_count: 10
+  quality_threshold: 4.0
+
+runtime:
+  timezone: "Asia/Dubai"
+  max_parallel_tasks: 3
+  approval_timeout_hours: 12
+  retry_limit: 2
+
+notifications:
+  channel: "console"
+  target: ""
+  on_stage_start: true
+  on_stage_fail: true
+  on_gate_required: true
+
+knowledge_base:
+  backend: "markdown"
+  root: "docs/kb"
+
+openclaw_bridge:
+  use_cron: false
+  use_message: false
+  use_memory: false
+  use_sessions_spawn: false
+  use_web_fetch: false
+  use_browser: false
+
+llm:
+  provider: "acp"
+  base_url: ""
+  api_key_env: ""
+  api_key: ""
+  primary_model: ""
+  fallback_models: []
+  acp:
+    agent: "codex"
+    cwd: "."
+    session_name: "researchclaw"
+    timeout_sec: 1800
+
+security:
+  hitl_required_stages: [5, 9, 20]
+  allow_publish_without_approval: false
+  redact_sensitive_logs: true
+
+experiment:
+  mode: "slurm"
+  time_budget_sec: 300
+  max_iterations: 10
+  metric_key: "primary_metric"
+  metric_direction: "minimize"
+  sandbox:
+    python_path: ".venv/bin/python3"
+    gpu_required: false
+    max_memory_mb: 4096
+  slurm:
+    partition: "hermes-2"
+    gpus_per_node: 8
+    cpus_per_task: 24
+    max_concurrent_jobs: 50
+    time_limit: "02:00:00"
+    exclusive: true
+    conda_env: ""
+    setup_commands:
+      - "module load rocm"
+    poll_interval_sec: 15
+    log_dir: "/mnt/vast01/users/dani.bouch/AutoResearchClaw/slurm_logs"
+    extra_sbatch_args:
+      - "--exclude=auh7-4b-gpu-156"
+  opencode:
+    enabled: true
+    auto: true
+    complexity_threshold: 0.2
+    model: ""
+    timeout_sec: 600
+    max_retries: 1
+    workspace_cleanup: true
+  figure_agent:
+    enabled: true
+    min_figures: 3
+    max_figures: 10
+    max_iterations: 3
+    render_timeout_sec: 30
+    output_format: "python"
+    nano_banana_enabled: false
+    strict_mode: false
+    dpi: 300
+
+metaclaw_bridge:
+  enabled: true
+  proxy_url: "http://localhost:30000"
+  skills_dir: "~/.metaclaw/skills"
+  fallback_url: ""
+  fallback_api_key: ""
+  lesson_to_skill:
+    enabled: true
+    min_severity: "warning"
+    max_skills_per_run: 3
+
+prompts:
+  custom_file: ""
