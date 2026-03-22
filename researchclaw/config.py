@@ -80,7 +80,7 @@ KB_SUBDIRS = (
 )
 PROJECT_MODES = {"docs-first", "semi-auto", "full-auto"}
 KB_BACKENDS = {"markdown", "obsidian"}
-EXPERIMENT_MODES = {"simulated", "sandbox", "docker", "ssh_remote", "colab_drive"}
+EXPERIMENT_MODES = {"simulated", "sandbox", "docker", "ssh_remote", "colab_drive", "slurm"}
 
 
 def _get_by_path(data: dict[str, Any], dotted_key: str) -> Any:
@@ -333,6 +333,23 @@ class FigureAgentConfig:
 
 
 @dataclass(frozen=True)
+class SlurmConfig:
+    """Slurm cluster experiment execution settings."""
+
+    partition: str = "hermes-2"
+    gpus_per_node: int = 8
+    cpus_per_task: int = 24
+    max_concurrent_jobs: int = 50
+    time_limit: str = "02:00:00"
+    exclusive: bool = True
+    conda_env: str = ""
+    setup_commands: tuple[str, ...] = ()
+    poll_interval_sec: int = 15
+    log_dir: str = "slurm_logs"
+    extra_sbatch_args: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ExperimentRepairConfig:
     """Experiment repair loop — diagnose and fix failed experiments before paper writing.
 
@@ -369,6 +386,7 @@ class ExperimentConfig:
     opencode: OpenCodeConfig = field(default_factory=OpenCodeConfig)
     benchmark_agent: BenchmarkAgentConfig = field(default_factory=BenchmarkAgentConfig)
     figure_agent: FigureAgentConfig = field(default_factory=FigureAgentConfig)
+    slurm: SlurmConfig = field(default_factory=SlurmConfig)
     repair: ExperimentRepairConfig = field(default_factory=ExperimentRepairConfig)
 
 
@@ -668,6 +686,7 @@ def _parse_experiment_config(data: dict[str, Any]) -> ExperimentConfig:
     docker_data = data.get("docker") or {}
     ssh_data = data.get("ssh_remote") or {}
     colab_data = data.get("colab_drive") or {}
+    slurm_data = data.get("slurm") or {}
     return ExperimentConfig(
         mode=data.get("mode", "simulated"),
         time_budget_sec=_safe_int(data.get("time_budget_sec"), 300),
@@ -734,6 +753,19 @@ def _parse_experiment_config(data: dict[str, Any]) -> ExperimentConfig:
             data.get("benchmark_agent") or {}
         ),
         figure_agent=_parse_figure_agent_config(data.get("figure_agent") or {}),
+        slurm=SlurmConfig(
+            partition=slurm_data.get("partition", "hermes-2"),
+            gpus_per_node=_safe_int(slurm_data.get("gpus_per_node"), 8),
+            cpus_per_task=_safe_int(slurm_data.get("cpus_per_task"), 24),
+            max_concurrent_jobs=_safe_int(slurm_data.get("max_concurrent_jobs"), 50),
+            time_limit=slurm_data.get("time_limit", "02:00:00"),
+            exclusive=bool(slurm_data.get("exclusive", True)),
+            conda_env=slurm_data.get("conda_env", ""),
+            setup_commands=tuple(slurm_data.get("setup_commands", ())),
+            poll_interval_sec=_safe_int(slurm_data.get("poll_interval_sec"), 15),
+            log_dir=slurm_data.get("log_dir", "slurm_logs"),
+            extra_sbatch_args=tuple(slurm_data.get("extra_sbatch_args", ())),
+        ),
         repair=_parse_experiment_repair_config(data.get("repair") or {}),
     )
 
